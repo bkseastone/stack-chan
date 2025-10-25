@@ -65,7 +65,7 @@ export async function addAudioSaveTask(robot) {
 
     await httpStreamPostReq({
         robot,
-        host: "192.168.1.25",
+        host: "192.168.31.64",
         port: 9092,
         path: "/paddlespeech/asr/streaming/save",
     })

@@ -155,7 +155,7 @@ export class HearingEngine {
       let that = this;
       await this.listen({
         that,
-        host: "192.168.1.25",
+        host: "192.168.31.64",
         port: 9292,
         path: "/bytedance/asr/streaming",
       })
@@ -232,7 +232,7 @@ export class ThinkingEngine {
     this.#owner.mouse.textGenerating = true;
     await this.answerUserQuestion({
       that,
-      host: "192.168.1.25",
+      host: "192.168.31.64",
       port: 10092,
       path: "/chatgpt/streaming",
       msg: this.#owner.ear.text,

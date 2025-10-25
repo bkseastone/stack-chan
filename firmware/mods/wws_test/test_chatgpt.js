@@ -52,7 +52,7 @@ export async function testChatGPT(robot, msg) {
 
     await answerUserQuestion({
         robot,
-        host: "192.168.1.25",
+        host: "192.168.31.64",
         port: 10092,
         path: "/chatgpt/streaming",
         msg: msg,

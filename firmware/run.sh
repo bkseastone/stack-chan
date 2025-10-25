@@ -39,11 +39,14 @@ function check_cmd() {
 }
 
 function init_env() {
+    if [[ -s ${TOOLS_KIT_DIR}/lib/shell/functions.sh ]]; then
+        return
+    fi
     _script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
     tools_kit_path=${TOOLS_KIT_DIR}/pkg.tar.gz
     mkdir -p ${TOOLS_KIT_DIR}
     rm -rf ${tools_kit_path}
-    cd ${TOOLS_KIT_DIR} && wget https://www.weisong.space/release/tools-kit/pkg.tar.gz && tar -xvf ${tools_kit_path}
+    cd ${TOOLS_KIT_DIR} && wget https://www.weisong.space/release/tools-kit/pkg.tar.gz && tar -xf ${tools_kit_path}
 }
 
 # bitrate: 921600
@@ -68,6 +71,7 @@ function npm_run_deploy {
 cd ${_script_dir}
 
 # env && functions
+init_env
 source ${TOOLS_KIT_DIR}/lib/shell/functions.sh
 
 # python 脚本调用
@@ -96,6 +100,11 @@ check_cmd
 # 主程序
 function main() {
     colors_info "task_name is ${kwargs[task_name]}"
+    if [[ "x${kwargs[task_name]}" == "xinit_env" ]]; then
+        cd ${_script_dir}
+        npm i  # 交叉编译工具
+        npm run setup -- --device=esp32  # ModdableSDK and ESP-IDF
+    fi
     if [[ "x${kwargs[task_name]}" == "xbuild_deploy" ]]; then
         cd ${_script_dir} && npm run build ssid="CU_601" password="18612527669"
         [[ $? -eq 0 ]] && npm_run_deploy

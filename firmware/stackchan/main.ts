@@ -12,7 +12,6 @@ import { TTS as LocalTTS } from 'tts-local'
 import { TTS as RemoteTTS } from 'tts-remote'
 import { TTS as VoiceVoxTTS } from 'tts-voicevox'
 import { TTS as ElevenLabsTTS } from 'tts-elevenlabs'
-import { TTS as PaddleSpeechTTS } from 'tts-paddlespeech'
 import defaultMod, { StackchanMod } from 'default-mods/mod'
 import { Renderer as SimpleRenderer } from 'simple-face'
 import { Renderer as DogFaceRenderer } from 'dog-face'
@@ -33,7 +32,6 @@ function createRobot() {
     ['remote', RemoteTTS],
     ['voicevox', VoiceVoxTTS],
     ['elevenlabs', ElevenLabsTTS],
-    ['paddlespeech', PaddleSpeechTTS],
   ])
   const renderers = new Map<string, new (param: unknown) => Renderer>([
     ['dog', DogFaceRenderer],

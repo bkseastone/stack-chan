@@ -38,7 +38,7 @@ export async function addWakeupTask(robot) {
 
     await wakeupWordDetect({
         robot,
-        host: "192.168.1.25",
+        host: "192.168.31.64",
         port: 9092,
         path: "/paddlespeech/kws/streaming",
     })
