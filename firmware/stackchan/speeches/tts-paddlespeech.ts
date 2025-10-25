@@ -16,7 +16,6 @@ export type TTSProperty = {
   onPlayed: (number) => void
   onDone: () => void
   host: string
-  path: string
   port: number
   sampleRate: number
   speakerId: number
@@ -29,7 +28,6 @@ export class TTS {
     // TODO: Add type definition for HTTPClient
     client: HTTPClient
     host: string
-    path: string
     port: number
     streaming: boolean
     file: File
@@ -40,7 +38,6 @@ export class TTS {
       this.audio = new AudioOut({ streams: 1, bitsPerSample: 16, sampleRate: props.sampleRate ?? 24000 })
       this.speakerId = props.speakerId ?? 0
       this.host = props.host
-      this.path = props.path ?? '/paddlespeech/tts/streaming'
       this.port = props.port
     }
     // todo: 可以用来测试同步请求的用法
@@ -88,7 +85,6 @@ export class TTS {
       this.streaming = true
   
       const host = this.host
-      const path = this.path
       const port = this.port
       const speakerId = this.speakerId
       // const sampleRate = await this.getSampleRate()
@@ -111,7 +107,7 @@ export class TTS {
           http: device.network.http,
           host,
           port,
-          path,
+          path: '/chattts/tts/streaming',
           audio: {
             out: audio,
             stream: 0,
@@ -119,7 +115,7 @@ export class TTS {
           bufferDuration: 600,
           request: {
             method: 'POST',
-            path: path,
+            path: '/chattts/tts/streaming',
             headers: new Map([
                 ['content-type', 'application/json'],
                 ['content-length', `${fileRead.length}`],

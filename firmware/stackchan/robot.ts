@@ -7,6 +7,11 @@ import { createBalloonDecorator } from 'decorator'
 import { DEFAULT_FONT } from 'consts'
 import Resource from 'Resource'
 import parseBMF from 'commodetto/parseBMF'
+import WebSocket from 'embedded:io/tcp/websocket'
+import AudioIn from "pins/audioin"
+import Time from 'time'
+import {Request} from "http"  // $(MODDABLE)/modules/network/http/http.js
+
 
 const INTERVAL_FACE = 1000 / 30
 const INTERVAL_POSE = 1000 / 10
@@ -65,6 +70,382 @@ type RobotConstructorParam<T extends string> = {
   touch?: Touch
 }
 
+/**
+ * 听力引擎
+ */
+export class HearingEngine {
+  #owner: Robot
+  #audioin: AudioIn
+  #listenHandler: Timer
+  listening: boolean  // 自身状态, 由"听力引擎"更新
+  isNeedToListen: boolean  // 启动开关, 由"唤醒引擎"或"语言引擎"打开, 由"听力引擎"关闭
+  text: string  // "听力引擎"的输出
+  constructor(param: {owner: Robot, audioin: AudioIn}) {
+    this.listening = false
+    this.isNeedToListen = false
+    this.text = ""
+    this.#owner = param.owner;
+    this.#audioin = param.audioin;
+    if (16 !== this.#audioin.bitsPerSample)
+        throw new Error("expects 16 bit samples");
+
+    this.start();
+  }
+
+  /**
+   * 仅debug用, 线上代码不要获取 #audioin, 因为这里没有加锁
+   */
+  get audioin() {
+    return this.#audioin;
+  }
+
+  // TODO: 这里要抽象出去, 类似于tts-remote, 通用的网络连接和硬件驱动都放到统一的地方, 不能干扰业务逻辑
+  async listen({that, host="127.0.0.1", port=80, path="/"}) : Promise<string> {
+    return new Promise((resolve, reject) => {
+        const chunksPerSecond = 10;  // 100ms
+        const sampleCount = Math.floor(that.#audioin.sampleRate / chunksPerSecond);
+        let asrResult = "";
+  
+        const ws = new WebSocket(`ws://${host}:${port}${path}`);
+  
+        ws.addEventListener('open', () => {
+            ws.send(that.#audioin.read(sampleCount));
+            // trace('send first done\n');
+        });
+        ws.addEventListener('message', (payload) => {
+            let value = JSON.parse(payload.data)
+            if (value.result === 0) {
+                // pcm data not enough
+                ws.send(that.#audioin.read(sampleCount));
+            }
+            else if (value.result === 1) {
+                // 用户持续一段时间没有再说话了, 服务端将要关闭连接, 不能再发消息了
+                // trace("user is no talking\n");
+            }
+            else {
+                // 获取语音识别结果
+                asrResult = value.result;
+                let chunk = that.#audioin.read(sampleCount);
+                ws.send(chunk);
+            }
+        });
+        ws.addEventListener('close', (event) => {
+            resolve(asrResult);
+            ws.close();
+        });
+        ws.addEventListener('error', (event) => {
+            reject(`${event}\n`);
+            ws.close();
+        });
+    });
+  }
+
+  start() {
+    this.stop()
+    this.#listenHandler = Timer.repeat(async () => {
+      // 确认听力引擎是否空闲
+      if (this.listening)
+        return;
+      // 检查是否启动监听
+      if (!this.isNeedToListen)
+        return;
+
+      this.listening = true;
+
+      let that = this;
+      await this.listen({
+        that,
+        host: "192.168.1.25",
+        port: 9292,
+        path: "/bytedance/asr/streaming",
+      })
+      .then(body => {
+        that.text = body;
+        trace(`[HearingEngine] listen response body: ${body}\n`);
+      })
+      .catch(error => {
+        that.text = "";
+        trace(`[HearingEngine] listen failed: ${error}\n`);
+      });
+
+      // 释放听力引擎
+      this.listening = false;
+      this.isNeedToListen = false;
+
+      if (this.text.length > 0) {
+        // 意图识别 & 状态流转
+        // todo: 将"answerUserQuestion"放到robot中去
+        if (this.#owner.brain.tasks?.["answerUserQuestion"]) {
+          this.#owner.brain.tasks["answerUserQuestion"].isNeedToThinkXxx = true;
+        }
+      } else {
+        // 没有新的语音输入, 关闭"聊天"功能
+        this.#owner.isNeedToChat = false;
+        trace(`[HearingEngine] no more input, stop chat.\n`);
+      }
+    }, 100)
+  }
+
+  stop() {
+    if (typeof this.#listenHandler !== 'undefined')
+      Timer.clear(this.#listenHandler)
+  }
+}
+
+/**
+ * 每个维度的思考都需要这样一个三元组: 自身状态, 启动开关, 定时器任务
+ */
+export type ThinkingTask = {
+  isThinkingXxx: boolean
+  isNeedToThinkXxx: boolean
+  xxxTask: Timer
+}
+
+/**
+ * 思考引擎
+ */
+export class ThinkingEngine {
+  #owner: Robot
+  tasks: { [taskName: string]: ThinkingTask }
+  defaultTaskName: string
+  constructor(param: {owner: Robot}) {
+    this.#owner = param.owner;
+    this.tasks = {}
+    this.defaultTaskName = 'answerUserQuestion'
+    this.register(this.defaultTaskName, Timer.repeat(this.defaultTaskHandler.bind(this), 100))
+  }
+
+  async defaultTaskHandler() {
+    let defaultTask = this.tasks[this.defaultTaskName]
+    // 确认思考引擎是否空闲
+    if (defaultTask.isThinkingXxx)
+      return;
+    // 检查是否启动思考
+    if (!defaultTask.isNeedToThinkXxx)
+      return;
+
+    defaultTask.isThinkingXxx = true;
+
+    trace(`[ThinkingEngine] start defaultTaskHandler(${this.defaultTaskName}) with input: ${this.#owner.ear.text}\n`)
+
+    let that = this;
+    this.#owner.mouse.textGenerating = true;
+    await this.answerUserQuestion({
+      that,
+      host: "192.168.1.25",
+      port: 10092,
+      path: "/chatgpt/streaming",
+      msg: this.#owner.ear.text,
+      task_name: this.defaultTaskName,
+    })
+    .then(body => trace(`[ThinkingEngine] ${this.defaultTaskName} output summary: ${body}\n`))
+    .catch(error => trace(`[ThinkingEngine] ${this.defaultTaskName} failed: ${error}\n`));
+    this.#owner.mouse.textGenerating = false;
+
+    // 释放思考引擎
+    defaultTask.isThinkingXxx = false;
+    defaultTask.isNeedToThinkXxx = false;
+  }
+
+  thinkDirectlyNoChat(text: string) {
+    this.tasks[this.defaultTaskName].isNeedToThinkXxx = true;
+    this.#owner.ear.text = text;
+    this.#owner.isNeedToChat = false;
+  }
+
+  async answerUserQuestion({that, host="127.0.0.1", port=80, path="/", msg="", task_name=""}) {
+    return new Promise((resolve, reject) => {
+      let request = new Request({
+        host: host,
+        port: port,
+        path: path,
+        method: "POST",
+        body: JSON.stringify({
+          text: msg,
+          task_name: task_name,
+        }),
+        headers: ["Content-Type", "application/json", 'Connection', 'Keep-Alive'],
+        response: undefined,
+      });
+
+      let errMsg = '';
+
+      request.callback = function(message, value, extValue) {
+        if (Request.status === message) {
+          if (value != 200) {
+            errMsg = `response status: ${value}\n`;
+          }
+        }
+        else if (Request.responseFragment === message) {
+          let resPart = this.read(String);
+          that.#owner.mouse.text += resPart;
+          // trace(`responseFragment: ${resPart}.\n`);
+        }
+        else if (Request.responseComplete === message) {
+          resolve(that.#owner.mouse.text);
+        }
+        else if (Request.error === message) {
+          reject(errMsg);
+        }
+        else if (message < 0) {
+          reject("message < 0");
+        }
+      }
+    });
+  }
+
+  register(taskName: string, task: Timer) {
+    this.deregister(taskName)
+    this.tasks[taskName] = {
+      isThinkingXxx: false,
+      isNeedToThinkXxx: false,
+      xxxTask: task,
+    }
+  }
+  deregister(taskName: string) {
+    if (typeof this.tasks?.[taskName]?.xxxTask !== 'undefined') {
+      if (this.tasks[taskName].xxxTask)
+        Timer.clear(this.tasks[taskName].xxxTask)
+      this.tasks[taskName].isThinkingXxx = false
+      this.tasks[taskName].isNeedToThinkXxx = false
+    }
+  }
+}
+
+/**
+ * 语言引擎
+ */
+export class LanguageEngine {
+  #owner: Robot
+  #speakHandler: Timer
+  speaking: boolean  // 自身状态, 由"语言引擎"更新
+
+  // 下面由"思考引擎"更新
+  text: string  // 可能需要说的话, 通过有无内容代替了isNeedToSpeak变量 (由语言引擎清空)
+  textGenerating: boolean  // 标识是否有正在思考中的问题尚未完成, 若是则不断检查text以输出语音, 否则在播放完text后清空text
+  lastTextTs: number  // 最近一次思考完问题的时间
+
+  // 下面由"语言引擎"更新
+  #speakIdx: number
+  audioGenerating: string  // 正在说的句子, 通过有无内容代替是否有正在说的话尚未完成
+  lastAudioTs: number  // 最近一次说完话的时间
+  constructor(param: {owner: Robot}) {
+    this.speaking = false
+    this.text = ""
+    this.textGenerating = false
+    this.lastTextTs = 0
+    this.#speakIdx = -1
+    this.audioGenerating = ""
+    this.lastAudioTs = 1
+    this.#owner = param.owner;
+
+    this.start();
+  }
+
+  /**
+   * 找到接下来可以说的句子 (后续这里可以优化成更智能的句子选择, 比如引入思考引擎, 根据其它环境(传感器)信息适时修改句子)
+   */
+  async inspectText(that: LanguageEngine) : Promise<string> {
+    return new Promise((resolve, reject) => {
+      // const messages = that.text.split(/[,.!?:;()，。！？：；（）]/);
+      const messages = that.text.split(/[。！？]/);
+      const lastSpeakIdx = that.#speakIdx;
+      for (let i = that.#speakIdx + 1; i < messages.length; i++) {
+        that.#speakIdx = i;
+        if (messages[i].length == 0) {
+          continue;
+        }
+        break;
+      };
+
+      // js的split方法会把空字符串也作为元素, 故这里需要过滤掉
+      if (messages[that.#speakIdx].length == 0) {
+        that.#speakIdx = lastSpeakIdx;
+      }
+
+      // trace(`debug LanguageEngine.inspectText: ${that.#speakIdx} | ${lastSpeakIdx} | ${messages.length} | ${messages}\n`)
+      if (that.#speakIdx != lastSpeakIdx && that.#speakIdx < messages.length) {
+        // TODO: 将标点符号加回来
+        resolve(messages[that.#speakIdx]);
+      }
+      else {
+        resolve("");
+      }
+    });
+  }
+
+  /**
+   * 直接向语言引擎发送语句, 并不触发对话逻辑
+   */
+  speakDirectlyNoChat(text: string) {
+    this.textGenerating = false;
+    this.text = text;
+    this.#owner.isNeedToChat = false;
+  }
+
+  /**
+   * 直接向语言引擎发送语句, 并触发对话逻辑
+   */
+  startChatWithSpeak(text: string) {
+    this.textGenerating = false;
+    this.text = text;
+    this.#owner.isNeedToChat = true;
+  }
+
+  start() {
+    this.stop()
+    this.#speakHandler = Timer.repeat(async () => {
+      // 确认语言引擎是否空闲
+      if (this.speaking)
+        return;
+      // 检查是否有需要说的话
+      if (this.text.length == 0)
+        return;
+      
+      this.speaking = true;
+
+      let that = this;
+      await this.inspectText(that)
+      .then(unfinishedText => {
+        that.audioGenerating = unfinishedText;
+      });
+
+      if (this.audioGenerating.length > 0) {
+        trace(`[LanguageEngine] input: ${this.audioGenerating}\n`)
+        // 避免调试时打扰, 可注释掉这一句, 将只输出到终端
+        await this.#owner.say(this.audioGenerating);
+        this.speaking = false;
+        return;  // 话没说完, 需要继续下一句的调度
+      }
+
+      // 释放语言引擎
+      this.speaking = false;
+
+      // 状态流转
+      if (this.textGenerating == false) {
+        this.text = "";
+        this.#reset();
+        if (this.#owner.isNeedToChat == true) {
+          this.#owner.ear.isNeedToListen = true;
+        }
+      }
+    }, 100)
+  }
+
+  #reset() {
+    this.#speakIdx = -1;
+    this.speaking = false;
+    this.lastAudioTs = this.#owner.getTimeNumber();
+    trace(`[LanguageEngine] reset ts: ${this.lastAudioTs}\n`)
+  }
+
+  stop() {
+    if (typeof this.#speakHandler !== 'undefined')
+      Timer.clear(this.#speakHandler);
+    this.#reset();
+  }
+}
+
 const LEFT_RIGHT = Object.freeze(['left', 'right'])
 export class Robot {
   /**
@@ -82,6 +463,9 @@ export class Robot {
   }
   #power: number
   #tts: TTS
+  #ear: HearingEngine
+  #brain: ThinkingEngine
+  #mouse: LanguageEngine
   #driver: Driver
   #button: { [key in ButtonName]: Button }
   #touch: Touch
@@ -95,10 +479,22 @@ export class Robot {
   #font: ReturnType<typeof parseBMF>
   #balloon: FaceDecorator
   updating: boolean
+  isNeedToChat: boolean  // 对话 状态标识/启动开关, 由"唤醒引擎"或"语言引擎"打开, 由"听力引擎"关闭
   constructor(params: RobotConstructorParam<ButtonName>) {
     this.useRenderer(params.renderer)
     this.useDriver(params.driver)
     this.useTTS(params.tts)
+    this.#ear = new HearingEngine({
+      owner: this,
+      audioin: new AudioIn(),
+    })
+    this.#brain = new ThinkingEngine({
+      owner: this,
+    })
+    this.#mouse = new LanguageEngine({
+      owner: this,
+    })
+    this.isNeedToChat = false
     this.#isMoving = false
     this.#power = 0
     this.#button = params.button
@@ -350,6 +746,18 @@ export class Robot {
     return this.#tts
   }
 
+  get ear(): HearingEngine {
+    return this.#ear
+  }
+
+  get brain(): ThinkingEngine {
+    return this.#brain
+  }
+
+  get mouse(): LanguageEngine {
+    return this.#mouse
+  }
+
   get renderer(): Renderer {
     return this.#renderer
   }
@@ -426,5 +834,24 @@ export class Robot {
       }
     }
     this.updating = false
+  }
+
+  getTimeString() {
+    let date = new Date();
+    let yyyy = date.getFullYear();
+    let MM = (date.getMonth()+1 < 10 ? '0'+(date.getMonth()+1) : date.getMonth()+1);
+    let dd = (date.getDate() < 10 ? '0'+(date.getDate()) : date.getDate());
+    let hh = (date.getHours() < 10 ? '0'+(date.getHours()) : date.getHours());
+    let mm = (date.getMinutes() < 10 ? '0'+(date.getMinutes()) : date.getMinutes());
+    let ss = (date.getSeconds() < 10 ? '0'+(date.getSeconds()) : date.getSeconds());
+    return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`
+  }
+
+  getTimeNumber() {
+      return Date.now()
+  }
+
+  static getVersion() {
+    return 0.0;
   }
 }

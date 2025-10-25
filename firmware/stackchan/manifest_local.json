@@ -1,15 +1,26 @@
 {
     "include": [
-        "./manifest.json"
+        "./manifest.json",
+        "./manifest_8mb_flash.json"
     ],
     "config": {
         "tts": {
-            "type": "voicevox",
-            "host": "192.168.7.136",
-            "port": 50021
+            "type": "remote",
+            "host": "192.168.31.64",
+            "path": "/paddlespeech/tts/streaming",
+            "port": 9092
+        },
+        "asr": {
+            "type": "remote",
+            "host": "192.168.31.64",
+            "path": "/bytedance/asr/streaming",
+            "port": 9292
         },
         "driver": {
-            "type": "scservo"
+            "type": "none"
+        },
+        "renderer": {
+            "type": "simple"
         }
     }
 }

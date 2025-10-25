@@ -4,6 +4,10 @@
     "$(MODDABLE)/examples/pins/audioout/resource-stream/manifest_streamer.json",
     "$(MODDABLE)/examples/pins/audioout/elevenlabs-stream/manifest_elevenlabsstreamer.json",
     "$(MODULES)/files/file/manifest_littlefs.json",
+    "$(MODULES)/network/http/manifest.json",
+    "$(MODDABLE)/examples/wws/websocketserver/manifest.json",
+    "$(MODDABLE)/examples/wws/Websocket/manifest.json",
+    "$(MODDABLE)/examples/wws/audioin/manifest.json",
     "./manifest_wavstream.json"
   ],
   "modules": {
@@ -19,6 +23,7 @@
     "tts-local",
     "tts-remote",
     "tts-voicevox",
-    "tts-elevenlabs"
+    "tts-elevenlabs",
+    "tts-paddlespeech"
   ]
 }
