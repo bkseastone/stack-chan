@@ -1,0 +1,14 @@
+{
+  "include": [
+    "$(MODDABLE)/examples/manifest_base.json",
+    "./manifest-driver.json"
+  ],
+  "config": {
+    "startupSound": false
+  },
+  "modules": {
+    "*": [
+      "./main"
+    ]
+  }
+}

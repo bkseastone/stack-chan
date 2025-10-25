@@ -1,0 +1,16 @@
+{
+  "build": {},
+  "include": ["$(MODDABLE)/examples/manifest_base.json", "$(MODDABLE)/examples/manifest_piu.json"],
+  "resources": {
+    "*": ["./assets/images/*"],
+    "*-alpha": ["./assets/fonts/*"]
+  },
+  "modules": {
+    "*": ["./main", "./avatar", "./marquee-label", "./balloon", "./emoticon"]
+  },
+  "preload": ["avatar", "marquee-label", "balloon", "emoticon"],
+  "creation": {
+    "static": 131072,
+    "stack": 512
+  }
+}
