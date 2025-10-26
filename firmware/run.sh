@@ -14,6 +14,7 @@ TOOLS_KIT_DIR=${_script_dir}/tools-kit
 function print_help() {
    echo "Usage: bash run.sh --task_name={DIR_NAME} [-h|-d]"
    echo ""
+   echo "   eg1: bash run.sh --task_name=init_env"
    echo "   eg1: bash run.sh --task_name=build_deploy"
    echo "   eg2: bash run.sh --task_name=deploy"
    echo "   eg3: bash run.sh --task_name=mod --mod_cfg=/Users/wangweisong/workspace/M5Stack/stack-chan/firmware/mods/wws_test/manifest.json"
@@ -106,6 +107,7 @@ function main() {
         npm run setup -- --device=esp32  # ModdableSDK and ESP-IDF
     fi
     if [[ "x${kwargs[task_name]}" == "xbuild_deploy" ]]; then
+        export PATH="~/.espressif/python_env/idf4.4_py3.11_env/bin:$PATH"
         cd ${_script_dir} && npm run build ssid="CU_601" password="18612527669"
         [[ $? -eq 0 ]] && npm_run_deploy
     fi
