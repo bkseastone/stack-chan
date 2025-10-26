@@ -2,7 +2,11 @@
 # MODIFICATION HISTORY
 #  --------------------
 # 2022/08/15, by wangweisong, create.
+# 2025/10/25, by wangweisong, set up more prerequisites.
 # 
+# NOTICE
+#  --------------------
+# ENV: bash 4.0+ 
 . ~/.bashrc
 
 # set -euxo pipefail
@@ -17,7 +21,7 @@ function print_help() {
    echo "   eg1: bash run.sh --task_name=init_env"
    echo "   eg1: bash run.sh --task_name=build_deploy"
    echo "   eg2: bash run.sh --task_name=deploy"
-   echo "   eg3: bash run.sh --task_name=mod --mod_cfg=/Users/wangweisong/workspace/M5Stack/stack-chan/firmware/mods/wws_test/manifest.json"
+   echo "   eg3: bash run.sh --task_name=mod --mod_cfg=~/workspace/M5Stack/stack-chan/firmware/mods/wws_test/manifest.json"
    echo ""
    echo "Options:"
    echo "  -h, --help                   Print this message and exit"
@@ -40,7 +44,7 @@ function check_cmd() {
 }
 
 function init_env() {
-    if [[ -s ${TOOLS_KIT_DIR}/lib/shell/functions.sh ]]; then
+    if [[ -f ${TOOLS_KIT_DIR}/.safe ]]; then 
         return
     fi
     _script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
@@ -52,9 +56,10 @@ function init_env() {
 
 # bitrate: 921600
 # bitrate: 115200
+# ENV: macos
 function npm_run_deploy {
-    cd /Users/wangweisong/.local/share/moddable/build/bin/esp32/m5stack/debug/stackchan
-    /Users/wangweisong/.local/share/esp32/esp-idf/components/esptool_py/esptool/esptool.py \
+    cd ~/.local/share/moddable/build/bin/esp32/m5stack/debug/stackchan
+    $HOME/.local/share/esp32/esp-idf/components/esptool_py/esptool/esptool.py \
         -p /dev/cu.usbserial-56D30069631 \
         -b 115200 \
         --before default_reset \
@@ -103,11 +108,14 @@ function main() {
     colors_info "task_name is ${kwargs[task_name]}"
     if [[ "x${kwargs[task_name]}" == "xinit_env" ]]; then
         cd ${_script_dir}
-        npm i  # 交叉编译工具
-        npm run setup -- --device=esp32  # ModdableSDK and ESP-IDF
+        npm i  # 安装交叉编译工具
+        npm run setup                    # 安装ModdableSDK
+        npm run setup -- --device=esp32  # 安装ESP-IDF (注意与ModdableSDK的先后顺序)
+        mv $HOME/.local/share/moddable $HOME/.local/share/moddable.bak
+        npm run setup_patch              # 
     fi
     if [[ "x${kwargs[task_name]}" == "xbuild_deploy" ]]; then
-        export PATH="~/.espressif/python_env/idf4.4_py3.11_env/bin:$PATH"
+        # export PATH="$HOME/.espressif/python_env/idf4.4_py3.9_env/bin:$PATH"
         cd ${_script_dir} && npm run build ssid="CU_601" password="18612527669"
         [[ $? -eq 0 ]] && npm_run_deploy
     fi
